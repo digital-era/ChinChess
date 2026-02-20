@@ -44,14 +44,13 @@
             top: 0; left: 0;
             width: 100%; height: 100%;
             z-index: 2;
-            pointer-events: none; /* Let clicks pass through to empty spots if needed */
         }
         .piece {
             position: absolute;
             width: 40px; height: 40px;
             border-radius: 50%;
             background: var(--piece-bg);
-            border: 1px solid #c8a97e;
+            border: 2px solid #c8a97e;
             box-shadow: 2px 3px 5px rgba(0,0,0,0.4);
             display: flex;
             justify-content: center;
@@ -61,7 +60,7 @@
             font-weight: bold;
             pointer-events: auto;
             cursor: pointer;
-            transition: transform 0.3s ease, box-shadow 0.2s;
+            transition: transform 0.2s ease, box-shadow 0.2s;
             box-sizing: border-box;
         }
         .piece:hover { box-shadow: 2px 5px 8px rgba(0,0,0,0.6); }
@@ -75,15 +74,15 @@
 
         .highlight {
             position: absolute;
-            width: 14px; height: 14px;
-            background-color: rgba(39, 174, 96, 0.7);
+            width: 16px; height: 16px;
+            background-color: rgba(39, 174, 96, 0.8);
             border-radius: 50%;
             pointer-events: auto;
             cursor: pointer;
-            z-index: 2;
+            z-index: 3;
             transform: translate(-50%, -50%);
         }
-        .highlight:hover { background-color: rgba(39, 174, 96, 1); }
+        .highlight:hover { background-color: rgba(39, 174, 96, 1); transform: translate(-50%, -50%) scale(1.2); }
     </style>
 </head>
 <body>
@@ -96,37 +95,35 @@
     </div>
 
 <script>
-/**
- * 优雅的中国象棋核心逻辑 & 基础 AI
- */
-
-// 棋盘常量配置
+// --- 初始化配置 ---
 const CELL = 50;
 const PADDING = 25;
 const ROWS = 10;
 const COLS = 9;
 
-// 字符映射：小写黑方，大写红方
 const CHARS = {
     'r': '車', 'h': '馬', 'e': '象', 'a': '士', 'g': '將', 'c': '砲', 's': '卒',
     'R': '車', 'H': '馬', 'E': '相', 'A': '仕', 'G': '帥', 'C': '炮', 'S': '兵'
 };
 
-// 棋子价值评估 (供AI使用)
 const VALUES = {
     'r': -900, 'h': -400, 'e': -200, 'a': -200, 'g': -10000, 'c': -450, 's': -100,
     'R': 900,  'H': 400,  'E': 200,  'A': 200,  'G': 10000,  'C': 450,  'S': 100
 };
 
-// 初始棋盘 (10行9列)
-let board =,,,,,,,,,
+// 移动方向常量（避免生成代码被截断）
+const DIRS_CROSS =,,,];
+const DIRS_DIAG =,,,];
+const DIRS_ELEPHANT =,,,];
+const DIRS_HORSE = [,,,,,,,];
+
+let board = [,,,,,,,,,
 ];
 
-// 游戏状态
 let currentPlayer = 'red'; 
 let isGameOver = false;
 let selectedPiece = null;
-let validMovesDisplay =[]; // 保存提示高亮的DOM
+let validMovesDisplay =[];
 
 const piecesLayer = document.getElementById('pieces-layer');
 const statusDiv = document.getElementById('status');
@@ -189,13 +186,15 @@ function renderPieces() {
                 let div = document.createElement('div');
                 div.className = `piece ${p === p.toUpperCase() ? 'red' : 'black'}`;
                 div.innerText = CHARS;
-                // 计算实际位置，居中对齐到交叉点
                 div.style.left = `${PADDING + c * CELL - 20}px`;
                 div.style.top = `${PADDING + r * CELL - 20}px`;
                 div.dataset.r = r;
                 div.dataset.c = c;
                 
-                div.onclick = (e) => handlePieceClick(r, c, p);
+                div.onclick = (e) => {
+                    e.stopPropagation();
+                    handlePieceClick(r, c, p);
+                };
                 piecesLayer.appendChild(div);
             }
         }
@@ -209,9 +208,8 @@ const isBlack = p => p !== '.' && p === p.toLowerCase();
 const isOpponent = (p, player) => p !== '.' && (player === 'red' ? isBlack(p) : isRed(p));
 const isEmpty = p => p === '.';
 
-// 获取所有合法的移动 (包含伪合法，未彻底过滤将帅对脸)
 function getValidMoves(b, r, c) {
-    let moves = [];
+    let moves =[];
     let p = b;
     if (isEmpty(p)) return moves;
     
@@ -222,48 +220,56 @@ function getValidMoves(b, r, c) {
         if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
             let target = b;
             if (isEmpty(target) || isOpponent(target, player)) {
-                moves.push();
+                moves.push({r: nr, c: nc});
             }
         }
     };
 
-    if (type === 'g') {,,,].forEach(() => {
-            let nr = r + dr, nc = c + dc;
+    if (type === 'g') {
+        DIRS_CROSS.forEach(d => {
+            let nr = r + d, nc = c + d;
             if (nc >= 3 && nc <= 5) {
                 if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) add(nr, nc);
             }
         });
     }
-    else if (type === 'a') {,,,].forEach(() => {
-            let nr = r + dr, nc = c + dc;
+    else if (type === 'a') {
+        DIRS_DIAG.forEach(d => {
+            let nr = r + d, nc = c + d;
             if (nc >= 3 && nc <= 5) {
                 if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) add(nr, nc);
             }
         });
     }
-    else if (type === 'e') {,,,].forEach(() => {
-            let nr = r + dr, nc = c + dc;
-            let eyenr = r + dr/2, eyenc = c + dc/2;
+    else if (type === 'e') {
+        DIRS_ELEPHANT.forEach(d => {
+            let nr = r + d, nc = c + d;
+            let eyenr = r + d/2, eyenc = c + d/2;
             if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) {
                 if ((player === 'red' && nr >= 5) || (player === 'black' && nr <= 4)) add(nr, nc);
             }
         });
     }
     else if (type === 'h') {
-        [,,,,,,,
-        ].forEach(() => {
-            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) add(nr, nc);
+        DIRS_HORSE.forEach(d => {
+            let nr = r + d, nc = c + d;
+            let legR = r + (Math.abs(d) === 2 ? d/2 : 0);
+            let legC = c + (Math.abs(d) === 2 ? d/2 : 0);
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) {
+                add(nr, nc);
+            }
         });
     }
-    else if (type === 'r' || type === 'c') {,,,].forEach(() => {
-            let nr = r + dr, nc = c + dc;
+    else if (type === 'r' || type === 'c') {
+        DIRS_CROSS.forEach(d => {
+            let nr = r + d, nc = c + d;
             let jumped = false;
             while (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
                 let target = b;
                 if (type === 'r') {
                     if (isEmpty(target)) { add(nr, nc); }
                     else { if (isOpponent(target, player)) add(nr, nc); break; }
-                } else { // Cannon
+                } else { // 炮
                     if (!jumped) {
                         if (isEmpty(target)) add(nr, nc);
                         else jumped = true;
@@ -274,7 +280,7 @@ function getValidMoves(b, r, c) {
                         }
                     }
                 }
-                nr += dr; nc += dc;
+                nr += d; nc += d;
             }
         });
     }
@@ -289,27 +295,26 @@ function getValidMoves(b, r, c) {
     return moves;
 }
 
-// 检查是否"飞将"（将帅直接对视）
 function isFlyingGeneral(b) {
     let rG=-1, cG=-1, rg=-1, cg=-1;
-    for(let r=0; r<ROWS; r++){
-        for(let c=0; c<COLS; c++){
-            if(b === 'G') { rG=r; cG=c; }
-            if(b === 'g') { rg=r; cg=c; }
+    for(let i=0; i<ROWS; i++){
+        for(let j=0; j<COLS; j++){
+            if(b === 'G') { rG=i; cG=j; }
+            if(b === 'g') { rg=i; cg=j; }
         }
     }
     if(cG === cg && cG !== -1) {
         let minR = Math.min(rG, rg);
         let maxR = Math.max(rG, rg);
         for(let i = minR + 1; i < maxR; i++) {
-            if(b !== '.') return false; // 中间有棋子
+            if(b !== '.') return false;
         }
-        return true; // 将帅对脸
+        return true; 
     }
     return false;
 }
 
-// --- 交互与游戏控制 ---
+// --- 交互控制 ---
 
 function clearHighlights() {
     validMovesDisplay.forEach(dom => dom.remove());
@@ -318,31 +323,33 @@ function clearHighlights() {
 
 function showHighlights(r, c, moves) {
     clearHighlights();
-    
-    // 给所有棋子去掉选中效果
     document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
-    // 给当前选中棋子加上选中效果
+    
     let pieceDom = document.querySelector(`.piece`);
     if(pieceDom) pieceDom.classList.add('selected');
 
-    moves.forEach(() => {
+    moves.forEach(m => {
         let div = document.createElement('div');
         div.className = 'highlight';
-        div.style.left = `${PADDING + nc * CELL}px`;
-        div.style.top = `${PADDING + nr * CELL}px`;
-        div.onclick = () => executeUserMove(r, c, nr, nc);
+        div.style.left = `${PADDING + m.c * CELL}px`;
+        div.style.top = `${PADDING + m.r * CELL}px`;
+        div.dataset.r = m.r;
+        div.dataset.c = m.c;
+        div.onclick = (e) => {
+            e.stopPropagation();
+            executeUserMove(r, c, m.r, m.c);
+        };
         piecesLayer.appendChild(div);
         validMovesDisplay.push(div);
     });
 }
 
 function handlePieceClick(r, c, p) {
-    if (isGameOver || currentPlayer !== 'red') return; // 只允许玩家点击红方
+    if (isGameOver || currentPlayer !== 'red') return; 
 
     if (isRed(p)) {
         selectedPiece = {r, c};
-        // 过滤掉导致飞将的自杀步
-        let moves = getValidMoves(board, r, c).filter(() => {
+        let moves = getValidMoves(board, r, c).filter(m => {
             let temp = board;
             board = board;
             board = '.';
@@ -353,24 +360,18 @@ function handlePieceClick(r, c, p) {
         });
         showHighlights(r, c, moves);
     } else if (selectedPiece) {
-        // 如果点击的是敌方棋子，尝试吃子判断是否在可走路径中
-        let targetHighlight = validMovesDisplay.find(dom => 
-            dom.style.left === `${PADDING + c * CELL}px` && 
-            dom.style.top === `${PADDING + r * CELL}px`
-        );
+        let targetHighlight = validMovesDisplay.find(dom => dom.dataset.r == r && dom.dataset.c == c);
         if(targetHighlight) {
             executeUserMove(selectedPiece.r, selectedPiece.c, r, c);
         }
     }
 }
 
-// 在空白处点击的处理（通过监听 piecesLayer 背景）
+// 点空白处取消选中
 piecesLayer.addEventListener('click', function(e) {
-    if (e.target === piecesLayer) {
-        clearHighlights();
-        selectedPiece = null;
-        document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
-    }
+    clearHighlights();
+    selectedPiece = null;
+    document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
 });
 
 function executeUserMove(fromR, fromC, toR, toC) {
@@ -390,28 +391,28 @@ function executeUserMove(fromR, fromC, toR, toC) {
     currentPlayer = 'black';
     statusDiv.innerText = "电脑思考中...";
     
-    // 延迟一小段时间，让UI有时间刷新，再执行AI
     setTimeout(() => aiPlay(), 50);
 }
 
-// --- 简易版 Minimax AI ---
+// --- 简易 Minimax AI ---
 
 function evaluate(b) {
-    if(isFlyingGeneral(b)) return -99999; // 极度惩罚引发飞将的局面
-    
-    let score = 0;
+    let score = 0, hasG = false, hasg = false;
     for(let i=0; i<ROWS; i++){
         for(let j=0; j<COLS; j++){
             let p = b;
             if(p !== '.') {
+                if(p === 'G') hasG = true;
+                if(p === 'g') hasg = true;
                 let val = VALUES;
-                // 兵卒过河奖励加成
                 if(p === 's' && i > 4) val -= 100;
                 if(p === 'S' && i < 5) val += 100;
                 score += val;
             }
         }
     }
+    if(!hasG) return -100000;
+    if(!hasg) return 100000;
     return score;
 }
 
@@ -422,25 +423,16 @@ function getAllMoves(b, player) {
             let p = b;
             if(p !== '.' && ((player === 'red' && isRed(p)) || (player === 'black' && isBlack(p)))) {
                 let pieceMoves = getValidMoves(b, r, c);
-                pieceMoves.forEach(() => moves.push({from:, to:}));
+                pieceMoves.forEach(pm => moves.push({from: {r, c}, to: {r: pm.r, c: pm.c}}));
             }
         }
     }
     return moves;
 }
 
-// 极小化极大算法连带 Alpha-Beta 剪枝 (层数设置为3层)
 function minimax(b, depth, alpha, beta, isMaxPlayer) {
     let score = evaluate(b);
-    // 判断是否有一方老将被吃
-    let hasG=false, hasg=false;
-    for(let i=0;i<ROWS;i++)for(let j=0;j<COLS;j++){
-        if(b==='G') hasG=true;
-        if(b==='g') hasg=true;
-    }
-    if(!hasG) return -100000;
-    if(!hasg) return 100000;
-    
+    if (score === -100000 || score === 100000) return score;
     if (depth === 0) return score;
 
     let moves = getAllMoves(b, isMaxPlayer ? 'red' : 'black');
@@ -449,14 +441,14 @@ function minimax(b, depth, alpha, beta, isMaxPlayer) {
     if (isMaxPlayer) {
         let maxEval = -Infinity;
         for (let m of moves) {
-            let temp = b]];
-            b]] = b]];
-            b][m.from] = '.';
+            let temp = b;
+            b = b;
+            b = '.';
             
             let ev = minimax(b, depth - 1, alpha, beta, false);
             
-            b]] = b]];
-            b]] = temp;
+            b = b;
+            b = temp;
             
             maxEval = Math.max(maxEval, ev);
             alpha = Math.max(alpha, ev);
@@ -466,14 +458,14 @@ function minimax(b, depth, alpha, beta, isMaxPlayer) {
     } else {
         let minEval = Infinity;
         for (let m of moves) {
-            let temp = b]];
-            b]] = b]];
-            b]] = '.';
+            let temp = b;
+            b = b;
+            b = '.';
             
             let ev = minimax(b, depth - 1, alpha, beta, true);
             
-            b]] = b[m.to]];
-            b]] = temp;
+            b = b;
+            b = temp;
             
             minEval = Math.min(minEval, ev);
             beta = Math.min(beta, ev);
@@ -485,30 +477,29 @@ function minimax(b, depth, alpha, beta, isMaxPlayer) {
 
 function aiPlay() {
     if(isGameOver) return;
-    let bestScore = Infinity; // AI是黑方，目标是使得分最小化
+    let bestScore = Infinity; 
     let bestMove = null;
     let moves = getAllMoves(board, 'black');
     
-    // 随机打乱移动顺序避免死循环重复着法
+    // 随机打乱避免重复
     moves.sort(() => Math.random() - 0.5);
     
     for (let m of moves) {
-        let temp = board][m.to];
-        board]] = board]];
-        board][m.from] = '.';
+        let temp = board;
+        board = board;
+        board = '.';
         
-        // 遇到自己暴露飞将的步子立刻放弃
         if (isFlyingGeneral(board)) {
-            board]] = board]];
-            board]] = temp;
+            board = board;
+            board = temp;
             continue;
         }
 
-        // 深度设为3，兼顾速度与智力
-        let score = minimax(board, 3, -Infinity, Infinity, true); 
+        // 深度 2 层的 Alpha-Beta
+        let score = minimax(board, 2, -Infinity, Infinity, true); 
         
-        board]] = board]];
-        board][m.to] = temp;
+        board = board;
+        board = temp;
         
         if (score < bestScore) {
             bestScore = score;
@@ -517,9 +508,9 @@ function aiPlay() {
     }
 
     if (bestMove) {
-        let targetPiece = board]];
-        board]] = board]];
-        board]] = '.';
+        let targetPiece = board;
+        board = board;
+        board = '.';
         renderPieces();
         
         if (targetPiece === 'G') {
@@ -540,10 +531,9 @@ function endGame(msg) {
     statusDiv.style.color = '#c0392b';
 }
 
-// 初始化
+// 启动渲染
 drawBoard();
 renderPieces();
-
 </script>
 </body>
 </html>
