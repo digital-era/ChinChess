@@ -95,445 +95,492 @@
     </div>
 
 <script>
-// --- 初始化配置 ---
-const CELL = 50;
-const PADDING = 25;
-const ROWS = 10;
-const COLS = 9;
+(function() {
+    // --- 初始化配置 ---
+    const CELL = 50;
+    const PADDING = 25;
+    const ROWS = 10;
+    const COLS = 9;
 
-const CHARS = {
-    'r': '車', 'h': '馬', 'e': '象', 'a': '士', 'g': '將', 'c': '砲', 's': '卒',
-    'R': '車', 'H': '馬', 'E': '相', 'A': '仕', 'G': '帥', 'C': '炮', 'S': '兵'
-};
-
-const VALUES = {
-    'r': -900, 'h': -400, 'e': -200, 'a': -200, 'g': -10000, 'c': -450, 's': -100,
-    'R': 900,  'H': 400,  'E': 200,  'A': 200,  'G': 10000,  'C': 450,  'S': 100
-};
-
-// 移动方向常量（避免生成代码被截断）
-const DIRS_CROSS =,,,];
-const DIRS_DIAG =,,,];
-const DIRS_ELEPHANT =,,,];
-const DIRS_HORSE = [,,,,,,,];
-
-let board = [,,,,,,,,,
-];
-
-let currentPlayer = 'red'; 
-let isGameOver = false;
-let selectedPiece = null;
-let validMovesDisplay =[];
-
-const piecesLayer = document.getElementById('pieces-layer');
-const statusDiv = document.getElementById('status');
-
-// --- 界面绘制 ---
-
-function drawBoard() {
-    const canvas = document.getElementById('board-canvas');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#5c3a21';
-    ctx.lineWidth = 1.5;
-
-    // 画横线
-    for (let i = 0; i < ROWS; i++) {
-        ctx.beginPath();
-        ctx.moveTo(PADDING, PADDING + i * CELL);
-        ctx.lineTo(PADDING + (COLS - 1) * CELL, PADDING + i * CELL);
-        ctx.stroke();
-    }
-    // 画竖线 (避开楚河汉界)
-    for (let j = 0; j < COLS; j++) {
-        ctx.beginPath();
-        ctx.moveTo(PADDING + j * CELL, PADDING);
-        ctx.lineTo(PADDING + j * CELL, PADDING + 4 * CELL);
-        ctx.stroke();
-        
-        ctx.beginPath();
-        ctx.moveTo(PADDING + j * CELL, PADDING + 5 * CELL);
-        ctx.lineTo(PADDING + j * CELL, PADDING + 9 * CELL);
-        ctx.stroke();
-    }
-    // 连接边缘竖线
-    ctx.beginPath(); ctx.moveTo(PADDING, PADDING + 4 * CELL); ctx.lineTo(PADDING, PADDING + 5 * CELL); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(PADDING + 8 * CELL, PADDING + 4 * CELL); ctx.lineTo(PADDING + 8 * CELL, PADDING + 5 * CELL); ctx.stroke();
-
-    // 画九宫格斜线
-    const drawCross = (r1, r2) => {
-        ctx.beginPath(); ctx.moveTo(PADDING + 3 * CELL, PADDING + r1 * CELL); ctx.lineTo(PADDING + 5 * CELL, PADDING + r2 * CELL); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(PADDING + 5 * CELL, PADDING + r1 * CELL); ctx.lineTo(PADDING + 3 * CELL, PADDING + r2 * CELL); ctx.stroke();
+    // 棋子显示字符
+    const CHARS = {
+        'r': '車', 'h': '馬', 'e': '象', 'a': '士', 'g': '將', 'c': '砲', 's': '卒',
+        'R': '车', 'H': '马', 'E': '相', 'A': '仕', 'G': '帅', 'C': '炮', 'S': '兵'
     };
-    drawCross(0, 2);
-    drawCross(7, 9);
 
-    // 楚河汉界文字
-    ctx.fillStyle = '#5c3a21';
-    ctx.font = "24px 'KaiTi', 'STKaiti', serif";
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText("楚 河", PADDING + 2 * CELL, PADDING + 4.5 * CELL);
-    ctx.fillText("汉 界", PADDING + 6 * CELL, PADDING + 4.5 * CELL);
-}
+    // 棋子价值（用于AI评估）
+    const VALUES = {
+        'r': -900, 'h': -400, 'e': -200, 'a': -200, 'g': -10000, 'c': -450, 's': -100,
+        'R': 900,  'H': 400,  'E': 200,  'A': 200,  'G': 10000,  'C': 450,  'S': 100
+    };
 
-function renderPieces() {
-    piecesLayer.innerHTML = '';
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            let p = board;
-            if (p !== '.') {
-                let div = document.createElement('div');
-                div.className = `piece ${p === p.toUpperCase() ? 'red' : 'black'}`;
-                div.innerText = CHARS;
-                div.style.left = `${PADDING + c * CELL - 20}px`;
-                div.style.top = `${PADDING + r * CELL - 20}px`;
-                div.dataset.r = r;
-                div.dataset.c = c;
-                
-                div.onclick = (e) => {
-                    e.stopPropagation();
-                    handlePieceClick(r, c, p);
-                };
-                piecesLayer.appendChild(div);
+    // 方向定义 [行偏移, 列偏移]
+    const DIRS_CROSS = [[1,0],[-1,0],[0,1],[0,-1]];
+    const DIRS_DIAG = [[1,1],[1,-1],[-1,1],[-1,-1]];
+    const DIRS_ELEPHANT = [[2,2],[2,-2],[-2,2],[-2,-2]];
+    const DIRS_HORSE = [[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]];
+
+    // 初始棋盘 (大写红方，小写黑方)
+    let board = [
+        ['r','h','e','a','g','a','e','h','r'],
+        ['.','.','.','.','.','.','.','.','.'],
+        ['.','c','.','.','.','.','.','c','.'],
+        ['s','.','s','.','s','.','s','.','s'],
+        ['.','.','.','.','.','.','.','.','.'],
+        ['.','.','.','.','.','.','.','.','.'],
+        ['S','.','S','.','S','.','S','.','S'],
+        ['.','C','.','.','.','.','.','C','.'],
+        ['.','.','.','.','.','.','.','.','.'],
+        ['R','H','E','A','G','A','E','H','R']
+    ];
+
+    let currentPlayer = 'red';   // 'red' 或 'black'
+    let isGameOver = false;
+    let selectedPiece = null;    // {r, c}
+    let validMovesDisplay = [];
+
+    const piecesLayer = document.getElementById('pieces-layer');
+    const statusDiv = document.getElementById('status');
+
+    // --- 辅助函数 ---
+    function isRed(p) { return p !== '.' && p === p.toUpperCase(); }
+    function isBlack(p) { return p !== '.' && p === p.toLowerCase(); }
+    function isOpponent(p, player) { return p !== '.' && (player === 'red' ? isBlack(p) : isRed(p)); }
+    function isEmpty(p) { return p === '.'; }
+
+    // --- 绘制棋盘 ---
+    function drawBoard() {
+        const canvas = document.getElementById('board-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#5c3a21';
+        ctx.lineWidth = 1.5;
+
+        // 画横线
+        for (let i = 0; i < ROWS; i++) {
+            ctx.beginPath();
+            ctx.moveTo(PADDING, PADDING + i * CELL);
+            ctx.lineTo(PADDING + (COLS - 1) * CELL, PADDING + i * CELL);
+            ctx.stroke();
+        }
+        // 画竖线 (避开楚河汉界)
+        for (let j = 0; j < COLS; j++) {
+            ctx.beginPath();
+            ctx.moveTo(PADDING + j * CELL, PADDING);
+            ctx.lineTo(PADDING + j * CELL, PADDING + 4 * CELL);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(PADDING + j * CELL, PADDING + 5 * CELL);
+            ctx.lineTo(PADDING + j * CELL, PADDING + 9 * CELL);
+            ctx.stroke();
+        }
+        // 连接边缘竖线 (河界断开处)
+        ctx.beginPath(); ctx.moveTo(PADDING, PADDING + 4 * CELL); ctx.lineTo(PADDING, PADDING + 5 * CELL); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(PADDING + 8 * CELL, PADDING + 4 * CELL); ctx.lineTo(PADDING + 8 * CELL, PADDING + 5 * CELL); ctx.stroke();
+
+        // 画九宫格斜线
+        function drawCross(r1, r2) {
+            ctx.beginPath(); ctx.moveTo(PADDING + 3 * CELL, PADDING + r1 * CELL); ctx.lineTo(PADDING + 5 * CELL, PADDING + r2 * CELL); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(PADDING + 5 * CELL, PADDING + r1 * CELL); ctx.lineTo(PADDING + 3 * CELL, PADDING + r2 * CELL); ctx.stroke();
+        }
+        drawCross(0, 2);
+        drawCross(7, 9);
+
+        // 楚河汉界文字
+        ctx.fillStyle = '#5c3a21';
+        ctx.font = "24px 'KaiTi', 'STKaiti', serif";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText("楚 河", PADDING + 2 * CELL, PADDING + 4.5 * CELL);
+        ctx.fillText("汉 界", PADDING + 6 * CELL, PADDING + 4.5 * CELL);
+    }
+
+    // --- 渲染棋子 ---
+    function renderPieces() {
+        piecesLayer.innerHTML = '';
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                let p = board[r][c];
+                if (p !== '.') {
+                    let div = document.createElement('div');
+                    div.className = `piece ${isRed(p) ? 'red' : 'black'}`;
+                    div.innerText = CHARS[p] || p; 
+                    div.style.left = `${PADDING + c * CELL - 20}px`;
+                    div.style.top = `${PADDING + r * CELL - 20}px`;
+                    div.dataset.r = r;
+                    div.dataset.c = c;
+
+                    div.onclick = (e) => {
+                        e.stopPropagation();
+                        handlePieceClick(r, c, p);
+                    };
+                    piecesLayer.appendChild(div);
+                }
             }
         }
     }
-}
 
-// --- 游戏规则与逻辑 ---
+    // --- 获取某位置棋子的合法移动 (不考虑己方将帅对面) ---
+    function getValidMoves(boardState, r, c) {
+        let moves = [];
+        let p = boardState[r][c];
+        if (isEmpty(p)) return moves;
 
-const isRed = p => p !== '.' && p === p.toUpperCase();
-const isBlack = p => p !== '.' && p === p.toLowerCase();
-const isOpponent = (p, player) => p !== '.' && (player === 'red' ? isBlack(p) : isRed(p));
-const isEmpty = p => p === '.';
+        let player = isRed(p) ? 'red' : 'black';
+        let type = p.toLowerCase();
 
-function getValidMoves(b, r, c) {
-    let moves =[];
-    let p = b;
-    if (isEmpty(p)) return moves;
-    
-    let player = isRed(p) ? 'red' : 'black';
-    let type = p.toLowerCase();
+        const add = (nr, nc) => {
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                let target = boardState[nr][nc];
+                if (isEmpty(target) || isOpponent(target, player)) {
+                    moves.push({ r: nr, c: nc });
+                }
+            }
+        };
 
-    const add = (nr, nc) => {
-        if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
-            let target = b;
-            if (isEmpty(target) || isOpponent(target, player)) {
-                moves.push({r: nr, c: nc});
-            }
-        }
-    };
-
-    if (type === 'g') {
-        DIRS_CROSS.forEach(d => {
-            let nr = r + d, nc = c + d;
-            if (nc >= 3 && nc <= 5) {
-                if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) add(nr, nc);
-            }
-        });
-    }
-    else if (type === 'a') {
-        DIRS_DIAG.forEach(d => {
-            let nr = r + d, nc = c + d;
-            if (nc >= 3 && nc <= 5) {
-                if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) add(nr, nc);
-            }
-        });
-    }
-    else if (type === 'e') {
-        DIRS_ELEPHANT.forEach(d => {
-            let nr = r + d, nc = c + d;
-            let eyenr = r + d/2, eyenc = c + d/2;
-            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) {
-                if ((player === 'red' && nr >= 5) || (player === 'black' && nr <= 4)) add(nr, nc);
-            }
-        });
-    }
-    else if (type === 'h') {
-        DIRS_HORSE.forEach(d => {
-            let nr = r + d, nc = c + d;
-            let legR = r + (Math.abs(d) === 2 ? d/2 : 0);
-            let legC = c + (Math.abs(d) === 2 ? d/2 : 0);
-            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) {
-                add(nr, nc);
-            }
-        });
-    }
-    else if (type === 'r' || type === 'c') {
-        DIRS_CROSS.forEach(d => {
-            let nr = r + d, nc = c + d;
-            let jumped = false;
-            while (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
-                let target = b;
-                if (type === 'r') {
-                    if (isEmpty(target)) { add(nr, nc); }
-                    else { if (isOpponent(target, player)) add(nr, nc); break; }
-                } else { // 炮
-                    if (!jumped) {
-                        if (isEmpty(target)) add(nr, nc);
-                        else jumped = true;
-                    } else {
-                        if (!isEmpty(target)) {
-                            if (isOpponent(target, player)) add(nr, nc);
-                            break;
-                        }
+        if (type === 'g') { // 将/帅
+            for (let d of DIRS_CROSS) {
+                let nr = r + d[0], nc = c + d[1];
+                // 九宫限制
+                if (nc >= 3 && nc <= 5) {
+                    if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) {
+                        add(nr, nc);
                     }
                 }
-                nr += d; nc += d;
             }
+        }
+        else if (type === 'a') { // 士/仕
+            for (let d of DIRS_DIAG) {
+                let nr = r + d[0], nc = c + d[1];
+                if (nc >= 3 && nc <= 5) {
+                    if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) {
+                        add(nr, nc);
+                    }
+                }
+            }
+        }
+        else if (type === 'e') { // 象/相
+            for (let d of DIRS_ELEPHANT) {
+                let nr = r + d[0], nc = c + d[1];
+                let eyeR = r + (d[0]/2), eyeC = c + (d[1]/2);
+                if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(boardState[eyeR][eyeC])) {
+                    if ((player === 'red' && nr >= 5) || (player === 'black' && nr <= 4)) { // 不能过河
+                        add(nr, nc);
+                    }
+                }
+            }
+        }
+        else if (type === 'h') { // 马
+            for (let d of DIRS_HORSE) {
+                let nr = r + d[0], nc = c + d[1];
+                // 绊马腿: 根据方向计算蹩脚位置
+                let legR = r, legC = c;
+                if (Math.abs(d[0]) === 2) legR = r + (d[0] > 0 ? 1 : -1);
+                if (Math.abs(d[1]) === 2) legC = c + (d[1] > 0 ? 1 : -1);
+                if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(boardState[legR][legC])) {
+                    add(nr, nc);
+                }
+            }
+        }
+        else if (type === 'r' || type === 'c') { // 车 或 炮
+            for (let d of DIRS_CROSS) {
+                let nr = r + d[0], nc = c + d[1];
+                let jumped = false; // 炮专用
+                while (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                    let target = boardState[nr][nc];
+                    if (type === 'r') { // 车
+                        if (isEmpty(target)) {
+                            add(nr, nc);
+                        } else {
+                            if (isOpponent(target, player)) add(nr, nc);
+                            break; // 遇到任何棋子停止
+                        }
+                    } else { // 炮
+                        if (!jumped) {
+                            if (isEmpty(target)) {
+                                add(nr, nc);
+                            } else {
+                                jumped = true; // 炮架
+                            }
+                        } else {
+                            if (!isEmpty(target)) {
+                                if (isOpponent(target, player)) add(nr, nc);
+                                break; // 无论是否吃子，炮停止
+                            }
+                        }
+                    }
+                    nr += d[0];
+                    nc += d[1];
+                }
+            }
+        }
+        else if (type === 's') { // 卒/兵
+            let dir = player === 'red' ? -1 : 1; // 红向上(行减小)，黑向下(行增大)
+            // 向前走一步
+            add(r + dir, c);
+            // 过河后可以左右
+            if ((player === 'red' && r <= 4) || (player === 'black' && r >= 5)) {
+                add(r, c - 1);
+                add(r, c + 1);
+            }
+        }
+        return moves;
+    }
+
+    // --- 判断是否将帅对面 (飞将) ---
+    function isFlyingGeneral(boardState) {
+        let redKingPos = null, blackKingPos = null;
+        for (let i = 0; i < ROWS; i++) {
+            for (let j = 0; j < COLS; j++) {
+                let p = boardState[i][j];
+                if (p === 'G') redKingPos = [i, j];
+                if (p === 'g') blackKingPos = [i, j];
+            }
+        }
+        if (!redKingPos || !blackKingPos) return false;
+        if (redKingPos[1] !== blackKingPos[1]) return false; // 列不同
+
+        let col = redKingPos[1];
+        let minRow = Math.min(redKingPos[0], blackKingPos[0]);
+        let maxRow = Math.max(redKingPos[0], blackKingPos[0]);
+        for (let row = minRow + 1; row < maxRow; row++) {
+            if (boardState[row][col] !== '.') return false; // 中间有棋子阻挡
+        }
+        return true; // 飞将成立
+    }
+
+    // --- 清除高亮 ---
+    function clearHighlights() {
+        validMovesDisplay.forEach(dom => dom.remove());
+        validMovesDisplay = [];
+        document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
+    }
+
+    // --- 显示可走位置 (过滤飞将) ---
+    function showHighlights(fromR, fromC, moves) {
+        clearHighlights();
+
+        let pieceDom = document.querySelector(`.piece[data-r='${fromR}'][data-c='${fromC}']`);
+        if (pieceDom) pieceDom.classList.add('selected');
+
+        // 过滤会导致飞将的走法
+        let filteredMoves = moves.filter(m => {
+            // 模拟走棋
+            let newBoard = board.map(row => [...row]); // 深拷贝
+            newBoard[m.r][m.c] = newBoard[fromR][fromC];
+            newBoard[fromR][fromC] = '.';
+            return !isFlyingGeneral(newBoard);
+        });
+
+        filteredMoves.forEach(m => {
+            let div = document.createElement('div');
+            div.className = 'highlight';
+            div.style.left = `${PADDING + m.c * CELL}px`;
+            div.style.top = `${PADDING + m.r * CELL}px`;
+            div.dataset.r = m.r;
+            div.dataset.c = m.c;
+            div.onclick = (e) => {
+                e.stopPropagation();
+                executeUserMove(fromR, fromC, m.r, m.c);
+            };
+            piecesLayer.appendChild(div);
+            validMovesDisplay.push(div);
         });
     }
-    else if (type === 's') {
-        let dir = player === 'red' ? -1 : 1;
-        add(r + dir, c);
-        if ((player === 'red' && r <= 4) || (player === 'black' && r >= 5)) {
-            add(r, c - 1);
-            add(r, c + 1);
+
+    // --- 处理棋子点击 ---
+    function handlePieceClick(r, c, p) {
+        if (isGameOver || currentPlayer !== 'red') return; // 只有红方回合且未结束
+
+        if (isRed(p)) {
+            // 选中己方棋子
+            selectedPiece = { r, c };
+            let moves = getValidMoves(board, r, c);
+            showHighlights(r, c, moves);
+        } else if (selectedPiece) {
+            // 点击了非己方棋子：检查是否在之前的高亮中，如果是则移动
+            let highlight = validMovesDisplay.find(dom => dom.dataset.r == r && dom.dataset.c == c);
+            if (highlight) {
+                executeUserMove(selectedPiece.r, selectedPiece.c, r, c);
+            } else {
+                // 点击敌方但不在高亮内，取消选中
+                clearHighlights();
+                selectedPiece = null;
+            }
         }
     }
-    return moves;
-}
 
-function isFlyingGeneral(b) {
-    let rG=-1, cG=-1, rg=-1, cg=-1;
-    for(let i=0; i<ROWS; i++){
-        for(let j=0; j<COLS; j++){
-            if(b === 'G') { rG=i; cG=j; }
-            if(b === 'g') { rg=i; cg=j; }
-        }
-    }
-    if(cG === cg && cG !== -1) {
-        let minR = Math.min(rG, rg);
-        let maxR = Math.max(rG, rg);
-        for(let i = minR + 1; i < maxR; i++) {
-            if(b !== '.') return false;
-        }
-        return true; 
-    }
-    return false;
-}
-
-// --- 交互控制 ---
-
-function clearHighlights() {
-    validMovesDisplay.forEach(dom => dom.remove());
-    validMovesDisplay =[];
-}
-
-function showHighlights(r, c, moves) {
-    clearHighlights();
-    document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
-    
-    let pieceDom = document.querySelector(`.piece`);
-    if(pieceDom) pieceDom.classList.add('selected');
-
-    moves.forEach(m => {
-        let div = document.createElement('div');
-        div.className = 'highlight';
-        div.style.left = `${PADDING + m.c * CELL}px`;
-        div.style.top = `${PADDING + m.r * CELL}px`;
-        div.dataset.r = m.r;
-        div.dataset.c = m.c;
-        div.onclick = (e) => {
-            e.stopPropagation();
-            executeUserMove(r, c, m.r, m.c);
-        };
-        piecesLayer.appendChild(div);
-        validMovesDisplay.push(div);
+    // 点空白区域取消选中
+    piecesLayer.addEventListener('click', function(e) {
+        // 只有点击在最外层空白才会触发（因为棋子和高亮会阻止冒泡）
+        clearHighlights();
+        selectedPiece = null;
     });
-}
 
-function handlePieceClick(r, c, p) {
-    if (isGameOver || currentPlayer !== 'red') return; 
+    // --- 执行走棋 (用户) ---
+    function executeUserMove(fromR, fromC, toR, toC) {
+        clearHighlights();
+        let targetPiece = board[toR][toC];
+        // 移动棋子
+        board[toR][toC] = board[fromR][fromC];
+        board[fromR][fromC] = '.';
+        selectedPiece = null;
 
-    if (isRed(p)) {
-        selectedPiece = {r, c};
-        let moves = getValidMoves(board, r, c).filter(m => {
-            let temp = board;
-            board = board;
-            board = '.';
-            let invalid = isFlyingGeneral(board);
-            board = board;
-            board = temp;
-            return !invalid;
-        });
-        showHighlights(r, c, moves);
-    } else if (selectedPiece) {
-        let targetHighlight = validMovesDisplay.find(dom => dom.dataset.r == r && dom.dataset.c == c);
-        if(targetHighlight) {
-            executeUserMove(selectedPiece.r, selectedPiece.c, r, c);
-        }
-    }
-}
-
-// 点空白处取消选中
-piecesLayer.addEventListener('click', function(e) {
-    clearHighlights();
-    selectedPiece = null;
-    document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
-});
-
-function executeUserMove(fromR, fromC, toR, toC) {
-    clearHighlights();
-    let targetPiece = board;
-    board = board;
-    board = '.';
-    selectedPiece = null;
-    
-    renderPieces();
-    
-    if (targetPiece === 'g') {
-        endGame('红方胜利！');
-        return;
-    }
-
-    currentPlayer = 'black';
-    statusDiv.innerText = "电脑思考中...";
-    
-    setTimeout(() => aiPlay(), 50);
-}
-
-// --- 简易 Minimax AI ---
-
-function evaluate(b) {
-    let score = 0, hasG = false, hasg = false;
-    for(let i=0; i<ROWS; i++){
-        for(let j=0; j<COLS; j++){
-            let p = b;
-            if(p !== '.') {
-                if(p === 'G') hasG = true;
-                if(p === 'g') hasg = true;
-                let val = VALUES;
-                if(p === 's' && i > 4) val -= 100;
-                if(p === 'S' && i < 5) val += 100;
-                score += val;
-            }
-        }
-    }
-    if(!hasG) return -100000;
-    if(!hasg) return 100000;
-    return score;
-}
-
-function getAllMoves(b, player) {
-    let moves =[];
-    for(let r=0; r<ROWS; r++){
-        for(let c=0; c<COLS; c++){
-            let p = b;
-            if(p !== '.' && ((player === 'red' && isRed(p)) || (player === 'black' && isBlack(p)))) {
-                let pieceMoves = getValidMoves(b, r, c);
-                pieceMoves.forEach(pm => moves.push({from: {r, c}, to: {r: pm.r, c: pm.c}}));
-            }
-        }
-    }
-    return moves;
-}
-
-function minimax(b, depth, alpha, beta, isMaxPlayer) {
-    let score = evaluate(b);
-    if (score === -100000 || score === 100000) return score;
-    if (depth === 0) return score;
-
-    let moves = getAllMoves(b, isMaxPlayer ? 'red' : 'black');
-    if(moves.length === 0) return isMaxPlayer ? -100000 : 100000;
-
-    if (isMaxPlayer) {
-        let maxEval = -Infinity;
-        for (let m of moves) {
-            let temp = b;
-            b = b;
-            b = '.';
-            
-            let ev = minimax(b, depth - 1, alpha, beta, false);
-            
-            b = b;
-            b = temp;
-            
-            maxEval = Math.max(maxEval, ev);
-            alpha = Math.max(alpha, ev);
-            if (beta <= alpha) break;
-        }
-        return maxEval;
-    } else {
-        let minEval = Infinity;
-        for (let m of moves) {
-            let temp = b;
-            b = b;
-            b = '.';
-            
-            let ev = minimax(b, depth - 1, alpha, beta, true);
-            
-            b = b;
-            b = temp;
-            
-            minEval = Math.min(minEval, ev);
-            beta = Math.min(beta, ev);
-            if (beta <= alpha) break;
-        }
-        return minEval;
-    }
-}
-
-function aiPlay() {
-    if(isGameOver) return;
-    let bestScore = Infinity; 
-    let bestMove = null;
-    let moves = getAllMoves(board, 'black');
-    
-    // 随机打乱避免重复
-    moves.sort(() => Math.random() - 0.5);
-    
-    for (let m of moves) {
-        let temp = board;
-        board = board;
-        board = '.';
-        
-        if (isFlyingGeneral(board)) {
-            board = board;
-            board = temp;
-            continue;
-        }
-
-        // 深度 2 层的 Alpha-Beta
-        let score = minimax(board, 2, -Infinity, Infinity, true); 
-        
-        board = board;
-        board = temp;
-        
-        if (score < bestScore) {
-            bestScore = score;
-            bestMove = m;
-        }
-    }
-
-    if (bestMove) {
-        let targetPiece = board;
-        board = board;
-        board = '.';
         renderPieces();
-        
-        if (targetPiece === 'G') {
-            endGame('电脑胜利！');
+
+        // 检查胜负
+        if (targetPiece === 'g') {
+            endGame('红方胜利！');
             return;
         }
-        
-        currentPlayer = 'red';
-        statusDiv.innerText = "玩家执红，请走棋";
-    } else {
-        endGame('红方胜利！(电脑无棋可走)');
+
+        currentPlayer = 'black';
+        statusDiv.innerText = "电脑思考中...";
+
+        setTimeout(() => aiPlay(), 50);
     }
-}
 
-function endGame(msg) {
-    isGameOver = true;
-    statusDiv.innerText = msg;
-    statusDiv.style.color = '#c0392b';
-}
+    // --- AI 部分 (极小极大+AlphaBeta) ---
 
-// 启动渲染
-drawBoard();
-renderPieces();
+    function evaluateBoard(boardState) {
+        let score = 0;
+        let hasRedKing = false, hasBlackKing = false;
+        for (let i = 0; i < ROWS; i++) {
+            for (let j = 0; j < COLS; j++) {
+                let p = boardState[i][j];
+                if (p !== '.') {
+                    if (p === 'G') hasRedKing = true;
+                    if (p === 'g') hasBlackKing = true;
+                    let val = VALUES[p] || 0;
+                    // 兵/卒过河加分
+                    if (p === 's' && i > 4) val -= 100; // 黑卒过河价值更高
+                    if (p === 'S' && i < 5) val += 100; // 红兵过河
+                    score += val;
+                }
+            }
+        }
+        if (!hasRedKing) return -100000; // 红方无帅，黑胜
+        if (!hasBlackKing) return 100000; // 黑方无将，红胜
+        return score;
+    }
+
+    function getAllMoves(boardState, player) {
+        let moves = [];
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                let p = boardState[r][c];
+                if (p !== '.' && ((player === 'red' && isRed(p)) || (player === 'black' && isBlack(p)))) {
+                    let pieceMoves = getValidMoves(boardState, r, c);
+                    pieceMoves.forEach(m => {
+                        moves.push({ from: { r, c }, to: { r: m.r, c: m.c } });
+                    });
+                }
+            }
+        }
+        return moves;
+    }
+
+    function minimax(boardState, depth, alpha, beta, isMaxPlayer) {
+        let score = evaluateBoard(boardState);
+        if (Math.abs(score) === 100000) return score; // 输赢已定
+        if (depth === 0) return score;
+
+        let moves = getAllMoves(boardState, isMaxPlayer ? 'red' : 'black');
+        if (moves.length === 0) {
+            // 无棋可走：被将死或困毙
+            return isMaxPlayer ? -100000 : 100000;
+        }
+
+        if (isMaxPlayer) {
+            let maxEval = -Infinity;
+            for (let m of moves) {
+                // 深拷贝棋盘
+                let newBoard = boardState.map(row => [...row]);
+                newBoard[m.to.r][m.to.c] = newBoard[m.from.r][m.from.c];
+                newBoard[m.from.r][m.from.c] = '.';
+
+                let ev = minimax(newBoard, depth - 1, alpha, beta, false);
+                maxEval = Math.max(maxEval, ev);
+                alpha = Math.max(alpha, ev);
+                if (beta <= alpha) break;
+            }
+            return maxEval;
+        } else {
+            let minEval = Infinity;
+            for (let m of moves) {
+                let newBoard = boardState.map(row => [...row]);
+                newBoard[m.to.r][m.to.c] = newBoard[m.from.r][m.from.c];
+                newBoard[m.from.r][m.from.c] = '.';
+
+                let ev = minimax(newBoard, depth - 1, alpha, beta, true);
+                minEval = Math.min(minEval, ev);
+                beta = Math.min(beta, ev);
+                if (beta <= alpha) break;
+            }
+            return minEval;
+        }
+    }
+
+    function aiPlay() {
+        if (isGameOver) return;
+
+        let bestScore = Infinity; // 电脑是黑方，希望分数最小
+        let bestMove = null;
+        let moves = getAllMoves(board, 'black');
+
+        // 随机打乱顺序，避免重复走法
+        moves.sort(() => Math.random() - 0.5);
+
+        for (let m of moves) {
+            // 模拟走棋
+            let newBoard = board.map(row => [...row]);
+            newBoard[m.to.r][m.to.c] = newBoard[m.from.r][m.from.c];
+            newBoard[m.from.r][m.from.c] = '.';
+
+            // 飞将检查 (黑方不能走导致飞将)
+            if (isFlyingGeneral(newBoard)) continue;
+
+            // 深度2的搜索
+            let score = minimax(newBoard, 2, -Infinity, Infinity, true); // 假设下一层红方最大化
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestMove = m;
+            }
+        }
+
+        if (bestMove) {
+            let targetPiece = board[bestMove.to.r][bestMove.to.c];
+            // 执行移动
+            board[bestMove.to.r][bestMove.to.c] = board[bestMove.from.r][bestMove.from.c];
+            board[bestMove.from.r][bestMove.from.c] = '.';
+            renderPieces();
+
+            if (targetPiece === 'G') {
+                endGame('电脑胜利！');
+                return;
+            }
+
+            currentPlayer = 'red';
+            statusDiv.innerText = "玩家执红，请走棋";
+        } else {
+            // 无合法移动，红方胜利
+            endGame('红方胜利！(电脑无棋可走)');
+        }
+    }
+
+    function endGame(msg) {
+        isGameOver = true;
+        statusDiv.innerText = msg;
+        statusDiv.style.color = '#c0392b';
+        clearHighlights();
+    }
+
+    // --- 启动 ---
+    drawBoard();
+    renderPieces();
+})();
 </script>
 </body>
 </html>
