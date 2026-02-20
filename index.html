@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>优雅的中国象棋 Web 版</title>
+    <style>
+        :root {
+            --board-bg: #e4c594;
+            --line-color: #5c3a21;
+            --red-piece: #c0392b;
+            --black-piece: #2c3e50;
+            --piece-bg: radial-gradient(circle at 15px 15px, #fff8e7, #e6d1a1);
+        }
+        body {
+            font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { color: #333; margin-bottom: 5px; }
+        .status-bar { margin-bottom: 20px; font-size: 18px; font-weight: bold; color: #555; }
+        
+        #game-container {
+            position: relative;
+            width: 450px;
+            height: 500px;
+            background-color: var(--board-bg);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            border-radius: 4px;
+            border: 2px solid var(--line-color);
+            user-select: none;
+        }
+        canvas {
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 1;
+        }
+        #pieces-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 2;
+            pointer-events: none; /* Let clicks pass through to empty spots if needed */
+        }
+        .piece {
+            position: absolute;
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            background: var(--piece-bg);
+            border: 1px solid #c8a97e;
+            box-shadow: 2px 3px 5px rgba(0,0,0,0.4);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'KaiTi', 'STKaiti', serif;
+            font-size: 24px;
+            font-weight: bold;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.2s;
+            box-sizing: border-box;
+        }
+        .piece:hover { box-shadow: 2px 5px 8px rgba(0,0,0,0.6); }
+        .piece.red { color: var(--red-piece); }
+        .piece.black { color: var(--black-piece); }
+        .piece.selected {
+            box-shadow: 0 0 0 3px #27ae60, 2px 3px 5px rgba(0,0,0,0.4);
+            transform: scale(1.05);
+            z-index: 10;
+        }
+
+        .highlight {
+            position: absolute;
+            width: 14px; height: 14px;
+            background-color: rgba(39, 174, 96, 0.7);
+            border-radius: 50%;
+            pointer-events: auto;
+            cursor: pointer;
+            z-index: 2;
+            transform: translate(-50%, -50%);
+        }
+        .highlight:hover { background-color: rgba(39, 174, 96, 1); }
+    </style>
+</head>
+<body>
+
+    <h1>中国象棋</h1>
+    <div class="status-bar" id="status">玩家执红，请走棋</div>
+    <div id="game-container">
+        <canvas id="board-canvas" width="450" height="500"></canvas>
+        <div id="pieces-layer"></div>
+    </div>
+
+<script>
+/**
+ * 优雅的中国象棋核心逻辑 & 基础 AI
+ */
+
+// 棋盘常量配置
+const CELL = 50;
+const PADDING = 25;
+const ROWS = 10;
+const COLS = 9;
+
+// 字符映射：小写黑方，大写红方
+const CHARS = {
+    'r': '車', 'h': '馬', 'e': '象', 'a': '士', 'g': '將', 'c': '砲', 's': '卒',
+    'R': '車', 'H': '馬', 'E': '相', 'A': '仕', 'G': '帥', 'C': '炮', 'S': '兵'
+};
+
+// 棋子价值评估 (供AI使用)
+const VALUES = {
+    'r': -900, 'h': -400, 'e': -200, 'a': -200, 'g': -10000, 'c': -450, 's': -100,
+    'R': 900,  'H': 400,  'E': 200,  'A': 200,  'G': 10000,  'C': 450,  'S': 100
+};
+
+// 初始棋盘 (10行9列)
+let board =,,,,,,,,,
+];
+
+// 游戏状态
+let currentPlayer = 'red'; 
+let isGameOver = false;
+let selectedPiece = null;
+let validMovesDisplay =[]; // 保存提示高亮的DOM
+
+const piecesLayer = document.getElementById('pieces-layer');
+const statusDiv = document.getElementById('status');
+
+// --- 界面绘制 ---
+
+function drawBoard() {
+    const canvas = document.getElementById('board-canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#5c3a21';
+    ctx.lineWidth = 1.5;
+
+    // 画横线
+    for (let i = 0; i < ROWS; i++) {
+        ctx.beginPath();
+        ctx.moveTo(PADDING, PADDING + i * CELL);
+        ctx.lineTo(PADDING + (COLS - 1) * CELL, PADDING + i * CELL);
+        ctx.stroke();
+    }
+    // 画竖线 (避开楚河汉界)
+    for (let j = 0; j < COLS; j++) {
+        ctx.beginPath();
+        ctx.moveTo(PADDING + j * CELL, PADDING);
+        ctx.lineTo(PADDING + j * CELL, PADDING + 4 * CELL);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(PADDING + j * CELL, PADDING + 5 * CELL);
+        ctx.lineTo(PADDING + j * CELL, PADDING + 9 * CELL);
+        ctx.stroke();
+    }
+    // 连接边缘竖线
+    ctx.beginPath(); ctx.moveTo(PADDING, PADDING + 4 * CELL); ctx.lineTo(PADDING, PADDING + 5 * CELL); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PADDING + 8 * CELL, PADDING + 4 * CELL); ctx.lineTo(PADDING + 8 * CELL, PADDING + 5 * CELL); ctx.stroke();
+
+    // 画九宫格斜线
+    const drawCross = (r1, r2) => {
+        ctx.beginPath(); ctx.moveTo(PADDING + 3 * CELL, PADDING + r1 * CELL); ctx.lineTo(PADDING + 5 * CELL, PADDING + r2 * CELL); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(PADDING + 5 * CELL, PADDING + r1 * CELL); ctx.lineTo(PADDING + 3 * CELL, PADDING + r2 * CELL); ctx.stroke();
+    };
+    drawCross(0, 2);
+    drawCross(7, 9);
+
+    // 楚河汉界文字
+    ctx.fillStyle = '#5c3a21';
+    ctx.font = "24px 'KaiTi', 'STKaiti', serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText("楚 河", PADDING + 2 * CELL, PADDING + 4.5 * CELL);
+    ctx.fillText("汉 界", PADDING + 6 * CELL, PADDING + 4.5 * CELL);
+}
+
+function renderPieces() {
+    piecesLayer.innerHTML = '';
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            let p = board;
+            if (p !== '.') {
+                let div = document.createElement('div');
+                div.className = `piece ${p === p.toUpperCase() ? 'red' : 'black'}`;
+                div.innerText = CHARS;
+                // 计算实际位置，居中对齐到交叉点
+                div.style.left = `${PADDING + c * CELL - 20}px`;
+                div.style.top = `${PADDING + r * CELL - 20}px`;
+                div.dataset.r = r;
+                div.dataset.c = c;
+                
+                div.onclick = (e) => handlePieceClick(r, c, p);
+                piecesLayer.appendChild(div);
+            }
+        }
+    }
+}
+
+// --- 游戏规则与逻辑 ---
+
+const isRed = p => p !== '.' && p === p.toUpperCase();
+const isBlack = p => p !== '.' && p === p.toLowerCase();
+const isOpponent = (p, player) => p !== '.' && (player === 'red' ? isBlack(p) : isRed(p));
+const isEmpty = p => p === '.';
+
+// 获取所有合法的移动 (包含伪合法，未彻底过滤将帅对脸)
+function getValidMoves(b, r, c) {
+    let moves = [];
+    let p = b;
+    if (isEmpty(p)) return moves;
+    
+    let player = isRed(p) ? 'red' : 'black';
+    let type = p.toLowerCase();
+
+    const add = (nr, nc) => {
+        if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+            let target = b;
+            if (isEmpty(target) || isOpponent(target, player)) {
+                moves.push();
+            }
+        }
+    };
+
+    if (type === 'g') {,,,].forEach(() => {
+            let nr = r + dr, nc = c + dc;
+            if (nc >= 3 && nc <= 5) {
+                if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) add(nr, nc);
+            }
+        });
+    }
+    else if (type === 'a') {,,,].forEach(() => {
+            let nr = r + dr, nc = c + dc;
+            if (nc >= 3 && nc <= 5) {
+                if ((player === 'red' && nr >= 7 && nr <= 9) || (player === 'black' && nr >= 0 && nr <= 2)) add(nr, nc);
+            }
+        });
+    }
+    else if (type === 'e') {,,,].forEach(() => {
+            let nr = r + dr, nc = c + dc;
+            let eyenr = r + dr/2, eyenc = c + dc/2;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) {
+                if ((player === 'red' && nr >= 5) || (player === 'black' && nr <= 4)) add(nr, nc);
+            }
+        });
+    }
+    else if (type === 'h') {
+        [,,,,,,,
+        ].forEach(() => {
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && isEmpty(b)) add(nr, nc);
+        });
+    }
+    else if (type === 'r' || type === 'c') {,,,].forEach(() => {
+            let nr = r + dr, nc = c + dc;
+            let jumped = false;
+            while (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                let target = b;
+                if (type === 'r') {
+                    if (isEmpty(target)) { add(nr, nc); }
+                    else { if (isOpponent(target, player)) add(nr, nc); break; }
+                } else { // Cannon
+                    if (!jumped) {
+                        if (isEmpty(target)) add(nr, nc);
+                        else jumped = true;
+                    } else {
+                        if (!isEmpty(target)) {
+                            if (isOpponent(target, player)) add(nr, nc);
+                            break;
+                        }
+                    }
+                }
+                nr += dr; nc += dc;
+            }
+        });
+    }
+    else if (type === 's') {
+        let dir = player === 'red' ? -1 : 1;
+        add(r + dir, c);
+        if ((player === 'red' && r <= 4) || (player === 'black' && r >= 5)) {
+            add(r, c - 1);
+            add(r, c + 1);
+        }
+    }
+    return moves;
+}
+
+// 检查是否"飞将"（将帅直接对视）
+function isFlyingGeneral(b) {
+    let rG=-1, cG=-1, rg=-1, cg=-1;
+    for(let r=0; r<ROWS; r++){
+        for(let c=0; c<COLS; c++){
+            if(b === 'G') { rG=r; cG=c; }
+            if(b === 'g') { rg=r; cg=c; }
+        }
+    }
+    if(cG === cg && cG !== -1) {
+        let minR = Math.min(rG, rg);
+        let maxR = Math.max(rG, rg);
+        for(let i = minR + 1; i < maxR; i++) {
+            if(b !== '.') return false; // 中间有棋子
+        }
+        return true; // 将帅对脸
+    }
+    return false;
+}
+
+// --- 交互与游戏控制 ---
+
+function clearHighlights() {
+    validMovesDisplay.forEach(dom => dom.remove());
+    validMovesDisplay =[];
+}
+
+function showHighlights(r, c, moves) {
+    clearHighlights();
+    
+    // 给所有棋子去掉选中效果
+    document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
+    // 给当前选中棋子加上选中效果
+    let pieceDom = document.querySelector(`.piece`);
+    if(pieceDom) pieceDom.classList.add('selected');
+
+    moves.forEach(() => {
+        let div = document.createElement('div');
+        div.className = 'highlight';
+        div.style.left = `${PADDING + nc * CELL}px`;
+        div.style.top = `${PADDING + nr * CELL}px`;
+        div.onclick = () => executeUserMove(r, c, nr, nc);
+        piecesLayer.appendChild(div);
+        validMovesDisplay.push(div);
+    });
+}
+
+function handlePieceClick(r, c, p) {
+    if (isGameOver || currentPlayer !== 'red') return; // 只允许玩家点击红方
+
+    if (isRed(p)) {
+        selectedPiece = {r, c};
+        // 过滤掉导致飞将的自杀步
+        let moves = getValidMoves(board, r, c).filter(() => {
+            let temp = board;
+            board = board;
+            board = '.';
+            let invalid = isFlyingGeneral(board);
+            board = board;
+            board = temp;
+            return !invalid;
+        });
+        showHighlights(r, c, moves);
+    } else if (selectedPiece) {
+        // 如果点击的是敌方棋子，尝试吃子判断是否在可走路径中
+        let targetHighlight = validMovesDisplay.find(dom => 
+            dom.style.left === `${PADDING + c * CELL}px` && 
+            dom.style.top === `${PADDING + r * CELL}px`
+        );
+        if(targetHighlight) {
+            executeUserMove(selectedPiece.r, selectedPiece.c, r, c);
+        }
+    }
+}
+
+// 在空白处点击的处理（通过监听 piecesLayer 背景）
+piecesLayer.addEventListener('click', function(e) {
+    if (e.target === piecesLayer) {
+        clearHighlights();
+        selectedPiece = null;
+        document.querySelectorAll('.piece').forEach(el => el.classList.remove('selected'));
+    }
+});
+
+function executeUserMove(fromR, fromC, toR, toC) {
+    clearHighlights();
+    let targetPiece = board;
+    board = board;
+    board = '.';
+    selectedPiece = null;
+    
+    renderPieces();
+    
+    if (targetPiece === 'g') {
+        endGame('红方胜利！');
+        return;
+    }
+
+    currentPlayer = 'black';
+    statusDiv.innerText = "电脑思考中...";
+    
+    // 延迟一小段时间，让UI有时间刷新，再执行AI
+    setTimeout(() => aiPlay(), 50);
+}
+
+// --- 简易版 Minimax AI ---
+
+function evaluate(b) {
+    if(isFlyingGeneral(b)) return -99999; // 极度惩罚引发飞将的局面
+    
+    let score = 0;
+    for(let i=0; i<ROWS; i++){
+        for(let j=0; j<COLS; j++){
+            let p = b;
+            if(p !== '.') {
+                let val = VALUES;
+                // 兵卒过河奖励加成
+                if(p === 's' && i > 4) val -= 100;
+                if(p === 'S' && i < 5) val += 100;
+                score += val;
+            }
+        }
+    }
+    return score;
+}
+
+function getAllMoves(b, player) {
+    let moves =[];
+    for(let r=0; r<ROWS; r++){
+        for(let c=0; c<COLS; c++){
+            let p = b;
+            if(p !== '.' && ((player === 'red' && isRed(p)) || (player === 'black' && isBlack(p)))) {
+                let pieceMoves = getValidMoves(b, r, c);
+                pieceMoves.forEach(() => moves.push({from:, to:}));
+            }
+        }
+    }
+    return moves;
+}
+
+// 极小化极大算法连带 Alpha-Beta 剪枝 (层数设置为3层)
+function minimax(b, depth, alpha, beta, isMaxPlayer) {
+    let score = evaluate(b);
+    // 判断是否有一方老将被吃
+    let hasG=false, hasg=false;
+    for(let i=0;i<ROWS;i++)for(let j=0;j<COLS;j++){
+        if(b==='G') hasG=true;
+        if(b==='g') hasg=true;
+    }
+    if(!hasG) return -100000;
+    if(!hasg) return 100000;
+    
+    if (depth === 0) return score;
+
+    let moves = getAllMoves(b, isMaxPlayer ? 'red' : 'black');
+    if(moves.length === 0) return isMaxPlayer ? -100000 : 100000;
+
+    if (isMaxPlayer) {
+        let maxEval = -Infinity;
+        for (let m of moves) {
+            let temp = b]];
+            b]] = b]];
+            b][m.from] = '.';
+            
+            let ev = minimax(b, depth - 1, alpha, beta, false);
+            
+            b]] = b]];
+            b]] = temp;
+            
+            maxEval = Math.max(maxEval, ev);
+            alpha = Math.max(alpha, ev);
+            if (beta <= alpha) break;
+        }
+        return maxEval;
+    } else {
+        let minEval = Infinity;
+        for (let m of moves) {
+            let temp = b]];
+            b]] = b]];
+            b]] = '.';
+            
+            let ev = minimax(b, depth - 1, alpha, beta, true);
+            
+            b]] = b[m.to]];
+            b]] = temp;
+            
+            minEval = Math.min(minEval, ev);
+            beta = Math.min(beta, ev);
+            if (beta <= alpha) break;
+        }
+        return minEval;
+    }
+}
+
+function aiPlay() {
+    if(isGameOver) return;
+    let bestScore = Infinity; // AI是黑方，目标是使得分最小化
+    let bestMove = null;
+    let moves = getAllMoves(board, 'black');
+    
+    // 随机打乱移动顺序避免死循环重复着法
+    moves.sort(() => Math.random() - 0.5);
+    
+    for (let m of moves) {
+        let temp = board][m.to];
+        board]] = board]];
+        board][m.from] = '.';
+        
+        // 遇到自己暴露飞将的步子立刻放弃
+        if (isFlyingGeneral(board)) {
+            board]] = board]];
+            board]] = temp;
+            continue;
+        }
+
+        // 深度设为3，兼顾速度与智力
+        let score = minimax(board, 3, -Infinity, Infinity, true); 
+        
+        board]] = board]];
+        board][m.to] = temp;
+        
+        if (score < bestScore) {
+            bestScore = score;
+            bestMove = m;
+        }
+    }
+
+    if (bestMove) {
+        let targetPiece = board]];
+        board]] = board]];
+        board]] = '.';
+        renderPieces();
+        
+        if (targetPiece === 'G') {
+            endGame('电脑胜利！');
+            return;
+        }
+        
+        currentPlayer = 'red';
+        statusDiv.innerText = "玩家执红，请走棋";
+    } else {
+        endGame('红方胜利！(电脑无棋可走)');
+    }
+}
+
+function endGame(msg) {
+    isGameOver = true;
+    statusDiv.innerText = msg;
+    statusDiv.style.color = '#c0392b';
+}
+
+// 初始化
+drawBoard();
+renderPieces();
+
+</script>
+</body>
+</html>
